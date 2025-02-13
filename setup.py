@@ -6,14 +6,15 @@ import math
 # Initialize pygame
 pygame.init()
 
-# Constants
-WIDTH, HEIGHT = 1280, 640  # Pool table size
+
+WIDTH, HEIGHT = 1280, 640
 BALL_RADIUS = 15
-FRICTION = 0.99
-SPEED_THRESHOLD = 10  # Speed threshold for stopping balls
+SPEED_THRESHOLD = 15
+SHOOT_FORCE = 1000
+
+FIELD = [(30,0), (1250,0), (1280, 30), (1280, 610), (1250, 640), (30, 640), (0, 610), (0, 30)]
 
 
-# Colors
 WHITE = (255, 255, 255)
 RED = (255, 0, 0)
 GREEN = (0, 128, 0)
@@ -29,9 +30,10 @@ clock = pygame.time.Clock()
 # Create physics space
 space = pymunk.Space()
 space.gravity = (0, 0)
-space.damping = 0.8  # Simulate friction
+space.damping = 0.85
 
 draw_options = pymunk.pygame_util.DrawOptions(screen)
+font = pygame.font.Font(None, 36)
 
 balls = []
 ball_colors = {}
@@ -71,7 +73,7 @@ def create_walls():
         pymunk.Segment(space.static_body, (1280, 30), (1280, 610), 1)
     ]
     for line in static_lines:
-        line.elasticity = 0.5
+        line.elasticity = 0.7
         space.add(line)
 
 create_walls()
@@ -96,8 +98,6 @@ def draw_pockets():
     pygame.draw.line(screen, BLACK, (620, 640), (660, 640), 5)
 
 
-
-
 def draw_balls():
     """Draws all balls on the screen."""
     for body, shape in balls:
@@ -110,76 +110,88 @@ def apply_friction():
         if speed < SPEED_THRESHOLD:
             body.velocity = (0, 0)  # Stop the ball completely
 
+def draw_aim_arrow():
+    """Draws the aiming arrow for the cue ball."""
+    arrow_length = 100
+    end_x = cue_ball.position.x + arrow_length * math.cos(aim_angle)
+    end_y = cue_ball.position.y + arrow_length * math.sin(aim_angle)
+    pygame.draw.line(screen, BLACK, (cue_ball.position.x, cue_ball.position.y), (end_x, end_y), 3)
+    pygame.draw.circle(screen, BLACK, (int(end_x), int(end_y)), 5)
 
-def shoot_ball():
-    """Handles the shooting mechanic of the cue ball (red ball)."""
-    global is_angle_set, is_force_set, angle, force
-    mouse_x, mouse_y = pygame.mouse.get_pos()  # Get mouse position
-    
-    # Find the direction vector from the cue ball to the mouse position
-    direction_x = mouse_x - cue_ball.position.x
-    direction_y = mouse_y - cue_ball.position.y
-    
-    # Calculate the distance (force) of the shot, which will be based on how far the mouse is dragged
-    distance = math.sqrt(direction_x ** 2 + direction_y ** 2)
-    
-    # Normalize the direction vector to apply the force to the cue ball in the correct direction
-    if distance > 0:
-        direction_x /= distance
-        direction_y /= distance
-    
-    # The force can be scaled by the distance, for example, 1:1 scaling
-    force = min(distance * 1.5, 1000)  # Cap the force to a reasonable value
-    
-    # Set the angle (direction) of the shot
-    angle = math.atan2(direction_y, direction_x)
-    
-    # Apply the force to the cue ball in the calculated direction
-    cue_ball.velocity = (direction_x * force, direction_y * force)
-    
-    # Reset flags so we don't drag the ball after the shot
-    is_angle_set = True
-    is_force_set = True
 
-def handle_drag_and_shoot():
-    """Handles the dragging and shooting of the red cue ball."""
-    global is_angle_set, angle_slider_pos, force_slider_pos
+def is_point_outside_polygon(point, vertices):
+    """Checks if a point is outside a given polygon using the Ray Casting method."""
+    x, y = point
+    inside = False
+    n = len(vertices)
     
-    mouse_x, mouse_y = pygame.mouse.get_pos()  # Get current mouse position
-    
-    if pygame.mouse.get_pressed()[0]:  # If left mouse button is held down
-        # If the mouse is pressed over the cue ball, allow dragging
-        if pygame.mouse.get_pressed()[0] and cue_ball.position.get_distance((mouse_x, mouse_y)) < BALL_RADIUS:
-            cue_ball.position = mouse_x, mouse_y  # Move cue ball to the mouse position
-            is_angle_set = False  # Do not shoot yet
-            is_force_set = False  # Do not apply force yet
-    
-    elif pygame.mouse.get_pressed()[0] == 0 and not is_angle_set:  # If mouse button is released
-        # Shoot the ball once the mouse is released
-        shoot_ball()
+    px, py = vertices[0]
+    for i in range(n + 1):
+        sx, sy = vertices[i % n]
+        if min(py, sy) < y <= max(py, sy) and x <= max(px, sx):
+            if py != sy:
+                xinters = (y - py) * (sx - px) / (sy - py) + px
+            if px == sx or x <= xinters:
+                inside = not inside
+        px, py = sx, sy
 
-# Variables for controlling the shot
-angle = 0  # Initial angle
-force = 500  # Default force (can be adjusted with slider)
-is_angle_set = False  # Flag to check if angle is set
-is_force_set = False  # Flag to check if force is set
-angle_slider_pos = 0  # Initial angle slider position (0 to 360)
-force_slider_pos = 500  # Initial force slider position (0 to 1000)
+    return not inside 
 
-font = pygame.font.Font(None, 36)
 
-while True:
+def check_pocket():
+    for body, shape in balls:
+        x, y = body.position
+        if is_point_outside_polygon((x, y), FIELD):
+            space.remove(body, shape)
+            balls.remove((body, shape))
+            del ball_colors[body]
+
+
+
+aim_mode = False
+aim_angle = 0
+
+running = True
+
+while running:
+    cue_ball.angular_velocity = 0
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_s:
+                aim_angle = 0
+                aim_mode = True  # Start aiming
+        if event.type == pygame.KEYUP:
+            if event.key == pygame.K_s and aim_mode:
+                # Shoot the cue ball
+                force_x = SHOOT_FORCE * math.cos(aim_angle)
+                force_y = SHOOT_FORCE * math.sin(aim_angle)
+                cue_ball.apply_impulse_at_local_point((force_x, force_y))
+                aim_mode = False  # Stop aiming
+
+    keys = pygame.key.get_pressed()
+    if aim_mode:
+        if keys[pygame.K_LEFT]:
+            aim_angle -= 0.02  # Rotate counter-clockwise
+        if keys[pygame.K_RIGHT]:
+            aim_angle += 0.02  # Rotate clockwise
+
     screen.fill(WHITE)
     pygame.draw.rect(screen, GREEN, (0, 0, WIDTH, HEIGHT))
     
     draw_pockets()
     draw_walls()
     
-    #handle_drag_and_shoot()
 
-    space.step(1/60)
+    space.step(1/180)
     apply_friction()
     draw_balls()
 
+    check_pocket()
+
+    if aim_mode:
+        draw_aim_arrow()
+
     pygame.display.flip()
-    clock.tick(60)
+    clock.tick(180)
