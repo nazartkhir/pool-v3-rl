@@ -106,9 +106,9 @@ def draw_balls():
 def apply_friction():
     """Stops balls that have very low speed."""
     for body, shape in balls:
-        speed = body.velocity.length  # Get current speed
+        speed = body.velocity.length
         if speed < SPEED_THRESHOLD:
-            body.velocity = (0, 0)  # Stop the ball completely
+            body.velocity = (0, 0)
 
 def draw_aim_arrow():
     """Draws the aiming arrow for the cue ball."""
@@ -184,7 +184,7 @@ while running:
     draw_walls()
     
 
-    space.step(1/180)
+    space.step(1/60)
     apply_friction()
     draw_balls()
 
