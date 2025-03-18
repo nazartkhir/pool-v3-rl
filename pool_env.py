@@ -8,7 +8,7 @@ import table
 
 
 class PoolEnv(gym.Env):
-    def __init__(self):
+    def __init__(self, n):
         super(PoolEnv, self).__init__()
         
         # Define Action and Observation Spaces
@@ -17,13 +17,13 @@ class PoolEnv(gym.Env):
             high=np.array([1]), 
             dtype=np.float32
         )
-        self.table = table.Table()
+        self.table = table.Table(n)
         
-        num_balls = 2 
+        self.num_balls = n
         self.observation_space = spaces.Box(
             low=-np.inf, 
             high=np.inf, 
-            shape=(2 * num_balls,), 
+            shape=((2 + 6 + 2*(self.num_balls-1)) + 2*(self.num_balls-1) + 6*(self.num_balls-1) + 6*(self.num_balls-1),), 
             dtype=np.float32
         )
 
@@ -34,9 +34,12 @@ class PoolEnv(gym.Env):
         observation = self.table.get_observation()
         return observation, {}
 
-    def step(self, action):
+    def step(self, action, render=False):
         angle = action[0]
-        self.table.make_shot(angle)
+        if render:
+            self.table.make_shot_with_render(angle)
+        else:
+            self.table.make_shot(angle)
         observation = self.table.get_observation()
         reward = self.table.get_reward()
         done = self.table.is_done()
@@ -55,13 +58,13 @@ gym.envs.registration.register(
 )
 
 if __name__ == "__main__":
-    env = PoolEnv()
+    env = PoolEnv(6)
     observation, _ = env.reset()
     done = False
     i = 0
     while not done:
         action = env.action_space.sample()  # Random action
-        observation, reward, done, _ = env.step(action)
+        observation, reward, done,truncated, _ = env.step(action)
         i += 1
     print(i)
     print(observation)

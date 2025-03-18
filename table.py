@@ -5,6 +5,7 @@ import math
 import numpy as np
 from const import *
 import random
+import time
 
 
 def is_point_outside_polygon(point, vertices):
@@ -154,8 +155,10 @@ class Table:
         pygame.display.set_caption("Pool Game")
         self.draw_options = pymunk.pygame_util.DrawOptions(self.screen)
         self.font = pygame.font.Font(None, 36)
-        running = True
 
+        self.reset_logging()
+
+        running = True
         while running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -176,12 +179,12 @@ class Table:
             self.apply_friction()
 
             if self.check_stop():
-                self.check_pocketed()
                 running = False
 
             pygame.display.flip()
 
             self.clock.tick(60)
+        self.check_pocketed()
         pygame.display.quit()
         pygame.quit()
 
@@ -192,6 +195,7 @@ class Table:
         self.cue_ball.body.angular_velocity = 0
         self.cue_ball.body.apply_impulse_at_local_point((force * math.cos(angle * math.pi), force * math.sin(angle * math.pi)))
         self.new_render()
+        time.sleep(1)
 
 
     def generate_two_random(self):
