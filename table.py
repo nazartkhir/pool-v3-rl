@@ -7,40 +7,56 @@ from const import *
 import random
 
 
+def is_point_outside_polygon(point, vertices):
+    """Checks if a point is outside a given polygon using the Ray Casting method."""
+    x, y = point
+    inside = False
+    n = len(vertices)
+    px, py = vertices[0]
+    for i in range(n + 1):
+        sx, sy = vertices[i % n]
+        if min(py, sy) < y <= max(py, sy) and x <= max(px, sx):
+            if py != sy:
+                xinters = (y - py) * (sx - px) / (sy - py) + px
+            if px == sx or x <= xinters:
+                inside = not inside
+        px, py = sx, sy
+    return not inside 
+
+class Ball:
+    def __init__(self, x, y, color, space):
+        self.color = color
+        self.body = pymunk.Body(1, pymunk.moment_for_circle(1, 0, BALL_RADIUS))
+        self.body.position = x, y
+        self.shape = pymunk.Circle(self.body, BALL_RADIUS)
+        self.shape.elasticity = ELASTICITY
+        #self.shape.friction = 0.9
+        self.pocketed = False
+        space.add(self.body, self.shape)
+
+
+
 class Table:
-    def __init__(self):
-        
+    def __init__(self, n):
         # Create physics space
         self.space = pymunk.Space()
         self.space.gravity = (0, 0)
-        self.space.damping = DAMPING
+        #self.space.damping = DAMPING
         self.create_walls()
         self.balls = []
-        self.ball_colors = {}
-        self.potted = []
         self.cue_ball = None
+        self.num = n
+        self.logging = None
 
     def close(self):
-        for body, shape in self.balls:
-            self.space.remove(body, shape)
-        self.balls = []
-        self.ball_colors = {}
-    
-    def create_ball(self, x,y, color):
-        body = pymunk.Body(1, pymunk.moment_for_circle(1, 0, BALL_RADIUS))
-        body.position = x, y
-        shape = pymunk.Circle(body, BALL_RADIUS)
-        shape.elasticity = 0.9
-        shape.friction = 0.9
-        self.space.add(body, shape)
-        self.balls.append((body, shape))
-        self.potted.append(False)
-        self.ball_colors[body] = color
-        return body
+        for ball in self.balls:
+            if ball.pocketed:
+                continue
+            self.space.remove(ball.body, ball.shape)
 
     def create_walls(self):
         """Creates the pool table walls with collisions."""
-        static_lines = [
+        self.static_lines = [
             pymunk.Segment(self.space.static_body, (30, 0), (610, 0), 1),
             pymunk.Segment(self.space.static_body, (660, 0), (1250, 0), 1),
             pymunk.Segment(self.space.static_body, (30, 640), (620, 640), 1),
@@ -48,7 +64,7 @@ class Table:
             pymunk.Segment(self.space.static_body, (0, 30), (0, 610), 1),
             pymunk.Segment(self.space.static_body, (1280, 30), (1280, 610), 1)
         ]
-        for line in static_lines:
+        for line in self.static_lines:
             line.elasticity = 0.7
             self.space.add(line)
 
@@ -75,15 +91,23 @@ class Table:
 
     def draw_balls(self):
         """Draws all balls on the screen."""
-        for body, shape in self.balls:
-            pygame.draw.circle(self.screen, self.ball_colors[body], (int(body.position.x), int(body.position.y)), BALL_RADIUS)
+        for ball in self.balls:
+            pygame.draw.circle(self.screen, ball.color, (int(ball.body.position.x), int(ball.body.position.y)), BALL_RADIUS)
+        
 
     def apply_friction(self):
-        """Stops balls that have very low speed."""
-        for body, shape in self.balls:
-            speed = body.velocity.length
-            if speed < SPEED_THRESHOLD:
-                body.velocity = (0, 0)
+        """Applies friction to slow down balls based on v(t) = v0 - μgt."""
+        for ball in self.balls:
+            speed = ball.body.velocity.length
+            if speed > 0:
+                decay1 = MU * G * (1 / 60) 
+                decay2 = ALPHA * speed * (1 / 60) 
+                decay3 = BETA * speed ** 2 * (1 / 60)
+                new_speed = max(0, speed - decay1 - decay2 - decay3)
+                if new_speed == 0:
+                    ball.body.velocity = (0, 0)
+                else:
+                    ball.body.velocity = ball.body.velocity.normalized() * new_speed
 
     def create_triangle(self):
         start_x = 900
@@ -94,39 +118,6 @@ class Table:
                 y = start_y - i * (BALL_RADIUS + 0.5) + j * (BALL_RADIUS * 2 + 1)
                 self.create_ball(x, y, WHITE)
 
-
-    def is_point_outside_polygon(self, point, vertices):
-        """Checks if a point is outside a given polygon using the Ray Casting method."""
-        x, y = point
-        inside = False
-        n = len(vertices)
-
-        px, py = vertices[0]
-        for i in range(n + 1):
-            sx, sy = vertices[i % n]
-            if min(py, sy) < y <= max(py, sy) and x <= max(px, sx):
-                if py != sy:
-                    xinters = (y - py) * (sx - px) / (sy - py) + px
-                if px == sx or x <= xinters:
-                    inside = not inside
-            px, py = sx, sy
-
-        return not inside 
-
-
-    def check_pocket(self):
-        self.flag = 0
-        for body, shape in self.balls:
-            x, y = body.position
-            if self.is_point_outside_polygon((x, y), FIELD) and not self.potted[self.balls.index((body, shape))]:
-                self.space.remove(body, shape)
-                self.potted[self.balls.index((body, shape))] = True
-                body.position = -100, -100
-                color = self.ball_colors[body]
-                if color == WHITE:
-                    self.flag = 1
-                if color == RED:
-                    self.flag = 2
 
     def render(self):
         pygame.init()
@@ -155,10 +146,53 @@ class Table:
         pygame.display.quit()
         pygame.quit()
 
-    def generate_two_balls(self):
-        """Generates two balls on the pool table."""
-        self.cue_ball = self.create_ball(300, 300, RED)
-        self.create_ball(500, 300, WHITE)
+    
+    def new_render(self):
+        pygame.init()
+        self.clock = pygame.time.Clock()
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption("Pool Game")
+        self.draw_options = pymunk.pygame_util.DrawOptions(self.screen)
+        self.font = pygame.font.Font(None, 36)
+        running = True
+
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        running = False
+
+            self.screen.fill(WHITE)
+            pygame.draw.rect(self.screen, GREEN, (0, 0, WIDTH, HEIGHT))
+
+            self.draw_pockets()
+            self.draw_walls()
+
+            self.draw_balls()
+
+            self.space.step(1 / 60)
+            self.apply_friction()
+
+            if self.check_stop():
+                self.check_pocketed()
+                running = False
+
+            pygame.display.flip()
+
+            self.clock.tick(60)
+        pygame.display.quit()
+        pygame.quit()
+
+
+    def make_shot_with_render(self, angle):
+        """Applies a shot to the cue ball."""
+        force = SHOOT_FORCE
+        self.cue_ball.body.angular_velocity = 0
+        self.cue_ball.body.apply_impulse_at_local_point((force * math.cos(angle * math.pi), force * math.sin(angle * math.pi)))
+        self.new_render()
+
 
     def generate_two_random(self):
         positions = []
@@ -178,65 +212,230 @@ class Table:
                 positions.append((x, y))
 
         # Create balls at the random positions
-        self.cue_ball = self.create_ball(positions[0][0], positions[0][1], RED)
-        self.create_ball(positions[1][0], positions[1][1], WHITE)
+        self.cue_ball = Ball(positions[0][0], positions[0][1], RED, self.space)
+        self.ball1 = Ball(positions[1][0], positions[1][1], WHITE, self.space)
+        self.balls = [self.cue_ball, self.ball1]
 
 
+    def generate_n_random(self, n):
+        positions = []
+        while len(positions) < n:
+            x = random.randint(BALL_RADIUS + 30, WIDTH - BALL_RADIUS - 30)
+            y = random.randint(BALL_RADIUS + 30, HEIGHT - BALL_RADIUS - 30)
+            overlap = False
+            for pos in positions:
+                if math.hypot(x - pos[0], y - pos[1]) < BALL_RADIUS * 2:
+                    overlap = True
+                    break
+            if not overlap:
+                positions.append((x, y))
+        for i in range(n):
+            if i == 0:
+                self.cue_ball = Ball(positions[i][0], positions[i][1], RED, self.space)
+                self.balls.append(self.cue_ball)
+            else:
+                self.balls.append(Ball(positions[i][0], positions[i][1], WHITE, self.space))
+
+    def respot_red(self):
+        while True:
+            x = random.randint(BALL_RADIUS + 30, WIDTH - BALL_RADIUS - 30)
+            y = random.randint(BALL_RADIUS + 30, HEIGHT - BALL_RADIUS - 30)
+            overlap = False
+            for ball in self.balls:
+                if math.hypot(x - ball.body.position.x, y - ball.body.position.y) < BALL_RADIUS * 2:
+                    overlap = True
+                    break
+            if not overlap:
+                self.cue_ball = Ball(x, y, RED, self.space)
+                self.balls[0] = self.cue_ball
+                break
+        
 
     def check_stop(self):
         """Checks if all balls have stopped moving."""
-        for body, shape in self.balls:
-            if body.velocity.length > SPEED_THRESHOLD:
+        for ball in self.balls:
+            if ball.body.velocity.length > 0:
                 return False
         return True
+
+
+    def check_pocketed(self):
+        for ball in self.balls:
+            if ball.pocketed:
+                continue
+            x, y = ball.body.position
+            if is_point_outside_polygon((x, y), FIELD):
+                if ball.color == RED:
+                    self.logging["red_pocketed"] = True
+                    self.space.remove(ball.body, ball.shape)
+                    self.respot_red()
+                    self.setup_collision_handlers()
+                else:
+                    self.logging["white_pocketed"] = True
+                    ball.body.position = -100, -100
+                    ball.pocketed = True
+                    self.space.remove(ball.body, ball.shape)
 
 
 
     def make_shot(self, angle):
         """Applies a shot to the cue ball."""
         force = SHOOT_FORCE
-        self.cue_ball.angular_velocity = 0
-        self.cue_ball.apply_impulse_at_local_point((force * math.cos(angle*math.pi), force * math.sin(angle*math.pi)))
+        self.cue_ball.body.angular_velocity = 0
+        self.cue_ball.body.apply_impulse_at_local_point((force * math.cos(angle*math.pi), force * math.sin(angle*math.pi)))
+        self.reset_logging()
         running = True
         while running:
             self.space.step(1/60)
             self.apply_friction()
             if self.check_stop():
                 running = False
-        self.check_pocket()
-            
+        self.check_pocketed()
 
-    def get_balls_cords(self):
-        """Returns the coordinates of all balls."""
-        balls = [body.position for body, shape in self.balls]
-        final = []
-        for ball in balls:
-            final.append(ball.x)
-            final.append(ball.y)
-        return final
+
+
+    def calculate_cue_pos(self):
+        body = self.cue_ball.body
+        x, y = body.position
+        dists_to_pockets = []
+        dists_to_balls = []
+        angle_to_balls = []
+        for pocket in POCKETS:
+            dist = math.hypot(x - pocket[0], y - pocket[1])
+            dists_to_pockets.append(dist)
+        for ball in self.balls:
+            if ball.color == RED:
+                continue
+            if ball.pocketed:
+                dists_to_balls.append(-1)
+                continue
+            dist = math.hypot(x - ball.body.position.x, y - ball.body.position.y)
+            dists_to_balls.append(dist)
+        for ball in self.balls:
+            if ball.color == RED:
+                continue
+            if ball.pocketed:
+                angle_to_balls.append(-1)
+                continue
+            angle = math.atan2(ball.body.position.y - y, ball.body.position.x - x)
+            angle_to_balls.append(angle)
+        info = [x, y]
+        info.extend(dists_to_pockets)
+        info.extend(dists_to_balls)
+        info.extend(angle_to_balls)
+        return info
+
+
+    def calculate_ball_pos(self):
+        info = []
+        for ball in self.balls:
+            if ball.color == RED:
+                continue
+            if ball.pocketed:
+                info.extend([-100, -100])
+                info.extend([-1, -1, -1, -1, -1, -1])
+                info.extend([-1, -1, -1, -1, -1, -1])
+                continue
+            x, y = ball.body.position
+            info.extend([x, y])
+            dists_to_pockets = []
+            angles_to_pockets = []
+            for pocket in POCKETS:
+                dist = math.hypot(x - pocket[0], y - pocket[1])
+                dists_to_pockets.append(dist)
+                angle = math.atan2(pocket[1] - y, pocket[0] - x)
+                angles_to_pockets.append(angle)
+            info.extend(dists_to_pockets)
+            info.extend(angles_to_pockets)
+        return info
+
     
+    def setup_collision_handlers(self):
+        """Sets up collision handlers for tracking cue ball interactions."""
+        def cue_hits_white(arbiter, space, data):
+            """Triggered when the cue ball hits a white ball."""
+            self.logging["white_hit"] = True
+            if not self.logging["wall_hit"]:
+                self.logging["white_before_wall"] = True
+            return True  # Continue normal physics processing
+
+        def cue_hits_wall(arbiter, space, data):
+            """Triggered when the cue ball hits a wall."""
+            self.logging["wall_hit"] = True
+            return True  # Continue normal physics processing
+
+        # Assign collision types
+        self.cue_ball.shape.collision_type = 1  # Cue ball
+        for ball in self.balls:
+            if ball.color == WHITE:
+                ball.shape.collision_type = 2  # White balls
+
+        for wall in self.static_lines:
+            wall.collision_type = 3  # Walls
+
+        # Create collision handlers
+        handler1 = self.space.add_collision_handler(1, 2)  # Cue ball - White ball
+        handler1.begin = cue_hits_white  
+
+        handler2 = self.space.add_collision_handler(1, 3)  # Cue ball - Wall
+        handler2.begin = cue_hits_wall
+
+    
+    def reset_logging(self):
+        self.logging = {
+            "red_pocketed": False,
+            "white_pocketed": False,
+            "wall_hit": False,
+            "white_hit": False,
+            "white_before_wall": False,
+        }
+
     def reset(self):
         """Resets the pool table."""
-        for body, shape in self.balls:
-            if not self.potted[self.balls.index((body, shape))]:
-                self.space.remove(body, shape)
+        for ball in self.balls:
+            if not ball.pocketed:
+                self.space.remove(ball.body, ball.shape)
         self.balls = []
-        self.ball_colors = {}
-        self.potted = []
-        self.generate_two_balls()
-    
+        self.cue_ball = None
+        self.reset_logging()
+        self.generate_n_random(self.num)
+        self.setup_collision_handlers()
+
+
     def get_observation(self):
         """Returns the observation of the environment."""
-        return np.array(self.get_balls_cords(), dtype=np.float32)
-    
+        #n = (2 + 6 + 2*(self.num_balls-1)) + 2*(self.num_balls-1) + 6*(self.num_balls-1) + 6*(self.num_balls-1)
+        arr = []
+        cue_info = self.calculate_cue_pos()
+        ball_info = self.calculate_ball_pos()
+        arr.extend(cue_info)
+        arr.extend(ball_info)
+        return np.array(arr, dtype=np.float32)
+
+
     def get_reward(self):
         """Returns the reward of the environment."""
-        if self.flag == 1:
-            return 1
-        if self.flag == 2:
-            return -0.2
-        return -0.001
+        base = 0.5
+        if self.logging["red_pocketed"]:
+            base += -1
+        if self.logging["white_pocketed"]:
+            base += 50
+        if self.logging["white_hit"]:
+            if self.logging["white_before_wall"]:
+                base += 10
+            else:
+                base += -1
+        else:
+            base += -2
+        return base
 
     def is_done(self):
         """Returns if the episode is done."""
-        return self.potted.count(True) == 1
+        pocketed_count = 0
+        for ball in self.balls:
+            if ball.pocketed and ball.color == WHITE:
+                pocketed_count += 1
+        if pocketed_count == self.num - 1:
+            return True
+        return False
+        
