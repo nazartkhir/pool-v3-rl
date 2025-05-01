@@ -16,20 +16,15 @@ model = PPO.load("test2")
 
 env  = PoolEnv(2)
 #env = Monitor(env)
-obs, _ = env.reset()
-done = False
-i = 0
-time.sleep(1)
-while not done:
-    print(obs)
-    time.sleep(5)
-    action, _ = model.predict(np.array(obs))
-    print(action)
-    obs, reward, done, info, truncated = env.step(action, render=True)
-    i += 1
-    time.sleep(1)
-    
-    
+res = []
+for _ in range(100):
+    obs, _ = env.reset()
+    done = False
+    i = 0
+    while not done:
+        action, _ = model.predict(np.array(obs))
+        obs, reward, done, info, truncated = env.step(action)
+        i += 1
 
-print("Steps:", i)
-env.close()
+    res.append(i)
+print("Steps:", np.mean(res))

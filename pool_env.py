@@ -10,20 +10,17 @@ import table
 class PoolEnv(gym.Env):
     def __init__(self, n):
         super(PoolEnv, self).__init__()
-        
+        self.num_actions = (n-1)*6
         # Define Action and Observation Spaces
-        self.action_space = spaces.Box(
-            low=np.array([-1]), 
-            high=np.array([1]), 
-            dtype=np.float32
-        )
+        self.action_space = spaces.Discrete(self.num_actions)
         self.table = table.Table(n)
         
         self.num_balls = n
         self.observation_space = spaces.Box(
             low=-np.inf, 
             high=np.inf, 
-            shape=((2 + 6 + 2*(self.num_balls-1)) + 2*(self.num_balls-1) + 6*(self.num_balls-1) + 6*(self.num_balls-1),), 
+            shape=((1+2 + 6 + 2*(self.num_balls-1)) + 2*(self.num_balls-1) + 6*(self.num_balls-1) + 6*(self.num_balls-1) + self.num_actions,), 
+            #shape = (self.num_balls-1,),
             dtype=np.float32
         )
 
@@ -35,7 +32,7 @@ class PoolEnv(gym.Env):
         return observation, {}
 
     def step(self, action, render=False):
-        angle = action[0]
+        angle = action
         if render:
             self.table.make_shot_with_render(angle)
         else:
@@ -45,6 +42,7 @@ class PoolEnv(gym.Env):
         done = self.table.is_done()
         truncated = False
         info = {}
+        self.table.time += 1
         
         return observation, reward, done, truncated, info
     
