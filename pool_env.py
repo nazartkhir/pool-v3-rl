@@ -19,7 +19,7 @@ class PoolEnv(gym.Env):
         self.observation_space = spaces.Box(
             low=-np.inf, 
             high=np.inf, 
-            shape=((1+2 + 6 + 2*(self.num_balls-1)) + 2*(self.num_balls-1) + 6*(self.num_balls-1) + 6*(self.num_balls-1) + self.num_actions,), 
+            shape=((1+2 + 6 + 2*(self.num_balls-1)) + 2*(self.num_balls-1) + 6*(self.num_balls-1) + 6*(self.num_balls-1) + 2*self.num_actions,), 
             #shape = (self.num_balls-1,),
             dtype=np.float32
         )

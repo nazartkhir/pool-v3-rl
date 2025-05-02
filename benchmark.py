@@ -12,12 +12,12 @@ from stable_baselines3.common.env_checker import check_env
 from pool_env import PoolEnv
 
 
-model = PPO.load("test2")
+model = PPO.load("pool_models/ppo_pool_n2_final")
 
 env  = PoolEnv(2)
 #env = Monitor(env)
 res = []
-for _ in range(100):
+for _ in range(5000):
     obs, _ = env.reset()
     done = False
     i = 0
