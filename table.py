@@ -61,7 +61,6 @@ class Ball:
 
 class Table:
     def __init__(self, n):
-        # Create physics space
         self.space = pymunk.Space()
         self.space.gravity = (0, 0)
         #self.space.collision_slop = 0.01
@@ -229,8 +228,6 @@ class Table:
         while len(positions) < 2:
             x = random.randint(BALL_RADIUS + 30, WIDTH - BALL_RADIUS - 30)
             y = random.randint(BALL_RADIUS + 30, HEIGHT - BALL_RADIUS - 30)
-
-            # Check for overlap with existing balls
             overlap = False
             for pos in positions:
                 if math.hypot(x - pos[0], y - pos[1]) < BALL_RADIUS * 2:
@@ -239,8 +236,6 @@ class Table:
                 
             if not overlap:
                 positions.append((x, y))
-
-        # Create balls at the random positions
         self.cue_ball = Ball(positions[0][0], positions[0][1], RED, self.space)
         self.ball1 = Ball(positions[1][0], positions[1][1], WHITE, self.space)
         self.balls = [self.cue_ball, self.ball1]
@@ -310,111 +305,62 @@ class Table:
         """
         Calculates the angle of the shot using the corrected ghost ball offset (2*R)
         and aiming slightly inside the pocket for robustness. Uses Vec2d math.
-
-        Args:
-            action (int): Encoded action (ball_target_index * num_pockets + pocket_index).
-
-        Returns:
-            float: The angle in radians. Returns 0.0 if the shot is invalid or impossible.
         """
         num_pockets = len(POCKETS)
-        num_target_balls = self.num - 1 # Number of balls excluding cue ball
+        num_target_balls = self.num - 1
 
         if num_target_balls <= 0:
-             # print("Error: No target balls available.") # Optional logging
              return 0.0
-
-        # --- Action Decoding ---
         ball_target_index = action // num_pockets
         pocket_index = action % num_pockets
-
-        # --- Basic Input Validation ---
         if not (0 <= ball_target_index < num_target_balls):
-            # print(f"Error: Invalid target ball index {ball_target_index} from action {action}.") # Optional logging
             return 0.0
         if not (0 <= pocket_index < num_pockets):
-             # print(f"Error: Invalid pocket index {pocket_index} from action {action}.") # Optional logging
              return 0.0
 
-        # --- Ball Selection (Corrected Indexing) ---
         actual_ball_list_index = ball_target_index + 1
         if actual_ball_list_index >= len(self.balls):
-             # print(f"Error: Calculated ball list index {actual_ball_list_index} out of bounds (size {len(self.balls)}).") # Optional logging
              return 0.0
 
         target_ball = self.balls[actual_ball_list_index]
 
         if target_ball.pocketed:
-            # print(f"Warning: Target {ball_target_index} (list idx {actual_ball_list_index}) already pocketed.") # Optional logging
-            return 0.0 # Shot impossible
+            return 0.0 
 
-        # --- Use Vec2d for Positions ---
-        cue_pos = self.cue_ball.body.position # Already Vec2d
-        target_pos = target_ball.body.position # Already Vec2d
+        cue_pos = self.cue_ball.body.position
+        target_pos = target_ball.body.position
         try:
-            # Convert pocket tuple to Vec2d
             pocket_pos = pymunk.Vec2d(POCKETS[pocket_index][0], POCKETS[pocket_index][1])
         except IndexError:
-             # print(f"Error: Pocket index {pocket_index} out of range during Vec2d conversion.") # Optional logging
              return 0.0
 
-        # --- Step 1: Vector from Target Ball to Original Pocket Center ---
         vec_target_pocket = pocket_pos - target_pos
         dist_target_pocket = vec_target_pocket.length
-
-        # Check if target ball is already too close/inside the pocket center
         if dist_target_pocket < BALL_RADIUS:
-             # print(f"Info: Target ball {ball_target_index} is too close to pocket {pocket_index}.") # Optional logging
              return 0.0
-
-        # Normalize direction (handle potential zero vector)
         try:
             dir_target_to_pocket_center = vec_target_pocket.normalized()
         except ZeroDivisionError:
-             # print(f"Warning: Zero vector encountered for target->pocket direction.") # Optional logging
-             return 0.0 # Cannot calculate direction
+             return 0.0
 
-        # --- Step 1b: Calculate Adjusted Target Point inside Pocket ---
-        # Aim slightly *into* the pocket opening for robustness. Adjust fraction as needed.
-        adjustment_distance = BALL_RADIUS * 1 # Aim half a radius into the pocket
+        adjustment_distance = BALL_RADIUS * 1
         adjusted_pocket_pos = pocket_pos - dir_target_to_pocket_center * adjustment_distance
 
-        # --- Step 1c: Recalculate Vector/Direction to Adjusted Point ---
         vec_target_adjusted_pocket = adjusted_pocket_pos - target_pos
         dist_target_adjusted_pocket = vec_target_adjusted_pocket.length
 
-        # Determine the final direction vector for the ghost ball calculation
         if dist_target_adjusted_pocket < 1e-6:
-             # Fallback if adjusted point is too close to target ball
-             # print(f"Warning: Adjusted pocket target is too close to target ball {ball_target_index}, using original direction.") # Optional logging
              dir_to_pocket = dir_target_to_pocket_center
         else:
             try:
                  dir_to_pocket = vec_target_adjusted_pocket.normalized()
             except ZeroDivisionError:
-                 # print(f"Warning: Zero vector encountered for target->adjusted_pocket direction, using original.") # Optional logging
-                 dir_to_pocket = dir_target_to_pocket_center # Fallback
-
-        # --- Step 2: Calculate Ghost Ball Position using CORRECT Offset ---
-        # The ghost ball center is positioned 2 * BALL_RADIUS (one diameter)
-        # behind the target ball center, opposite the direction towards the (adjusted) pocket.
-        ghost_ball_offset = 2 * BALL_RADIUS # <--- CORRECT GHOST BALL OFFSET
+                 dir_to_pocket = dir_target_to_pocket_center
+        ghost_ball_offset = 2 * BALL_RADIUS
         ghost_ball_pos = target_pos - dir_to_pocket * ghost_ball_offset
 
-        # --- Step 3: Vector from Cue Ball to Ghost Ball Position ---
         vec_cue_ghost = ghost_ball_pos - cue_pos
-
-        # --- Optional: Obstruction Checks would go here ---
-        # if not self.is_path_clear(cue_pos, ghost_ball_pos, ...): return 0.0
-        # if not self.is_path_clear(target_pos, adjusted_pocket_pos, ...): return 0.0
-
-        # --- Step 4: Calculate Final Angle from the Vector ---
-        # The angle of the vector from cue ball to ghost ball gives the shooting direction
-        angle = vec_cue_ghost.angle # Pymunk's Vec2d .angle property
-
-        # Optional Debug Print:
-        # print(f"Action: {action}, TargetIdx: {ball_target_index}, Pocket: {pocket_index}, GhostPos: {ghost_ball_pos.int_tuple}, Angle: {math.degrees(angle):.1f}")
-
+        angle = vec_cue_ghost.angle
         return angle
 
 
@@ -496,98 +442,49 @@ class Table:
     def get_straightness(self, action):
         """
         Calculates the straightness of a potential shot (cue-target-pocket alignment).
-
-        Args:
-            action (int): The encoded action identifying the target ball and pocket.
-
-        Returns:
-            float: A value between -1.0 and 1.0 representing straightness.
-                   1.0: Perfectly straight shot (Cue-Target-Pocket aligned, angle = 180 deg).
-                   0.0: 90-degree cut shot (angle = 90 deg).
-                  -1.0: Impossible shot (Target between Cue and Pocket, angle = 0 deg).
-                   Returns -1.0 for invalid actions, pocketed balls, or overlapping positions.
         """
         num_pockets = len(POCKETS)
         num_target_balls = self.num - 1
 
         if num_target_balls <= 0:
-            return -1.0 # No target balls
-
-        # --- Decode Action ---
+            return -1.0
         ball_target_index = action // num_pockets
         pocket_index = action % num_pockets
 
-        # --- Validate Indices ---
         if not (0 <= ball_target_index < num_target_balls):
-            # print(f"Straightness Error: Invalid target ball index {ball_target_index}.") # Optional logging
             return -1.0
         if not (0 <= pocket_index < num_pockets):
-             # print(f"Straightness Error: Invalid pocket index {pocket_index}.") # Optional logging
              return -1.0
-
-        # --- Get Ball Objects (Corrected Indexing) ---
         actual_ball_list_index = ball_target_index + 1
         if actual_ball_list_index >= len(self.balls):
-             # print(f"Straightness Error: Ball list index {actual_ball_list_index} out of bounds.") # Optional logging
              return -1.0
 
         target_ball = self.balls[actual_ball_list_index]
 
         if target_ball.pocketed:
-            # print(f"Straightness Info: Target {ball_target_index} already pocketed.") # Optional logging
-            return -1.0 # Cannot calculate straightness for pocketed ball
+            return -1.0 
 
-        # --- Get Positions as Vec2d ---
         cue_pos = self.cue_ball.body.position
         target_pos = target_ball.body.position
         try:
             pocket_pos = pymunk.Vec2d(POCKETS[pocket_index][0], POCKETS[pocket_index][1])
         except IndexError:
-             # print(f"Straightness Error: Pocket index {pocket_index} out of range.") # Optional logging
              return -1.0
-
-        # --- Calculate Vectors from the Target Ball ---
-        # Vector from Target pointing towards Cue
         vec_target_cue = cue_pos - target_pos
-        # Vector from Target pointing towards Pocket
         vec_target_pocket = pocket_pos - target_pos
 
-        # --- Calculate Magnitudes ---
         mag_tc = vec_target_cue.length
         mag_tp = vec_target_pocket.length
-
-        # --- Handle Edge Cases (Overlapping points) ---
-        # Use a small tolerance (e.g., fraction of ball radius)
-        # If points overlap, the angle is undefined, consider it impossible.
         min_dist = 0.1 * BALL_RADIUS
         if mag_tc < min_dist or mag_tp < min_dist:
-            # print(f"Straightness Warning: Cue/Target or Target/Pocket too close.") # Optional logging
             return -1.0
-
-        # --- Calculate Angle CTP using Dot Product ---
-        # Formula: dot(A, B) = |A| * |B| * cos(angle)
-        # cos(angle) = dot(A, B) / (|A| * |B|)
         dot_product = vec_target_cue.dot(vec_target_pocket)
-
-        # Clamp cosine value to [-1, 1] due to potential floating point inaccuracies
-        # This prevents math.acos from raising an error
         cos_theta = max(-1.0, min(1.0, dot_product / (mag_tc * mag_tp)))
-
-        # Calculate the angle CTP in radians [0, pi]
         angle_ctp_rad = math.acos(cos_theta)
-
-        # --- Scale the angle to the desired [-1, 1] range ---
-        # We want to map [0, pi] radians to [-1, 1] straightness.
-        # 0 rad   -> -1 (impossible shot)
-        # pi/2 rad ->  0 (90 degree cut)
-        # pi rad  ->  1 (perfectly straight)
-        # Linear scaling formula: straightness = (angle_rad / (pi/2)) - 1
-        # Or equivalently: straightness = (2 * angle_rad / pi) - 1
         straightness_value = (2.0 * angle_ctp_rad / math.pi) - 1.0
         if straightness_value < 0:
             return -1
-        # Optional: Small tolerance check for near-zero angle (already handled by scaling)
-        impossible_threshold_rad = math.radians(1) # e.g., 5 degrees
+        impossible_threshold_rad = math.radians(1)
         if angle_ctp_rad < impossible_threshold_rad:
             return -1.0
 
@@ -597,17 +494,12 @@ class Table:
     def calculate_straightness(self):
         """
         Calculates the straightness value for all possible actions.
-
-        Returns:
-            np.ndarray: An array of straightness values (-1.0 to 1.0) for each action.
         """
         num_actions = (self.num - 1) * len(POCKETS)
-        straightness_values = np.full(num_actions, -1.0, dtype=np.float32) # Initialize with -1.0
+        straightness_values = np.full(num_actions, -1.0, dtype=np.float32)
 
         for action in range(num_actions):
-            # Call the corrected get_straightness method
             straightness = self.get_straightness(action)
-            # get_straightness now returns the scaled value or -1.0 directly
             straightness_values[action] = straightness
 
         return straightness_values
@@ -615,39 +507,29 @@ class Table:
     def is_pot_possible(self, action):
         """
         Determines if a shot is physically possible, primarily checking for obstructions.
-        This now includes checking the path from the target ball to the pocket.     
-        Args:
-            action (int): The encoded action.       
-        Returns:
-            int: 1 if the shot is possible, 0 if it's obstructed.
+        This now includes checking the path from the target ball to the pocket.
         """     
         num_pockets = len(POCKETS)
         num_target_balls = self.num - 1     
         if num_target_balls <= 0:
-            return 0  # No target balls, shot impossible        
-        # --- Decode Action ---
+            return 0       
         ball_target_index = action // num_pockets
         pocket_index = action % num_pockets     
-        # --- Validate Indices ---
         if not (0 <= ball_target_index < num_target_balls):
             return 0
         if not (0 <= pocket_index < num_pockets):
             return 0        
-        # --- Get Ball Objects (Corrected Indexing) ---
         actual_ball_list_index = ball_target_index + 1
         if actual_ball_list_index >= len(self.balls):
             return 0        
         target_ball = self.balls[actual_ball_list_index]        
         if target_ball.pocketed:
-            return 0  # Target ball already pocketed        
-        # --- Get Positions ---
+            return 0       
         cue_pos = self.cue_ball.body.position
         target_pos = target_ball.body.position
         pocket_pos = pymunk.Vec2d(*POCKETS[pocket_index])       
-        # --- Basic Checks ---
         if cue_pos.get_distance(target_pos) < 1e-6:
             return 0        
-        # --- Obstruction Check: Cue Ball to Target Ball ---
         shot_line = (cue_pos, target_pos)
         for other_ball in self.balls:
             if other_ball in [self.cue_ball, target_ball] or other_ball.pocketed:
@@ -659,7 +541,6 @@ class Table:
                 proj_len = (other_ball_pos - cue_pos).dot(direction.normalized())
                 if 0 < proj_len < direction.length:
                     return 0        
-        # --- Obstruction Check: Target Ball to Pocket ---
         pocket_line = (target_pos, pocket_pos)
         for other_ball in self.balls:
             if other_ball in [self.cue_ball, target_ball] or other_ball.pocketed:
@@ -677,12 +558,10 @@ class Table:
 
     def calculate_possibility(self):
         num_actions = (self.num - 1) * len(POCKETS)
-        pos_values = np.full(num_actions, 0, dtype=np.float32) # Initialize with -1.0
+        pos_values = np.full(num_actions, 0, dtype=np.float32)
 
         for action in range(num_actions):
-            # Call the corrected get_straightness method
             pos = self.is_pot_possible(action)
-            # get_straightness now returns the scaled value or -1.0 directly
             pos_values[action] = pos
 
         return pos_values
@@ -695,27 +574,25 @@ class Table:
             self.logging["white_hit"] = True
             if not self.logging["wall_hit"]:
                 self.logging["white_before_wall"] = True
-            return True  # Continue normal physics processing
+            return True
 
         def cue_hits_wall(arbiter, space, data):
             """Triggered when the cue ball hits a wall."""
             self.logging["wall_hit"] = True
-            return True  # Continue normal physics processing
+            return True
 
-        # Assign collision types
-        self.cue_ball.shape.collision_type = 1  # Cue ball
+        self.cue_ball.shape.collision_type = 1
         for ball in self.balls:
             if ball.color == WHITE:
-                ball.shape.collision_type = 2  # White balls
+                ball.shape.collision_type = 2
 
         for wall in self.static_lines:
-            wall.collision_type = 3  # Walls
+            wall.collision_type = 3
 
-        # Create collision handlers
-        handler1 = self.space.add_collision_handler(1, 2)  # Cue ball - White ball
+        handler1 = self.space.add_collision_handler(1, 2)
         handler1.begin = cue_hits_white  
 
-        handler2 = self.space.add_collision_handler(1, 3)  # Cue ball - Wall
+        handler2 = self.space.add_collision_handler(1, 3)
         handler2.begin = cue_hits_wall
 
     
