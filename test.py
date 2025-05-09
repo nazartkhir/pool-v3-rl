@@ -10,26 +10,13 @@ from stable_baselines3.common.noise import NormalActionNoise
 from stable_baselines3.common.env_checker import check_env
 from pool_env import PoolEnv
 
-# Create and wrap environment
+
 env = PoolEnv(4)
 env = Monitor(env)
-
-
-
-# Define TensorBoard log directory
 log_dir = "./tensorboard_logs/"
-
 model = PPO("MlpPolicy", env, verbose=1,clip_range=0.3, learning_rate=0.0003, tensorboard_log=log_dir)
-
-
 model.learn(total_timesteps=10000)
-
-
-
-# Save the trained model
 model.save("test1")
-
-# Close environment
 env.close()
 
 
